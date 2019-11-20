@@ -37,6 +37,13 @@
 #define USB_PACKET_LENGTH   64
 
 /*
+ * This packet is required for Xbox One Elite Series 2 pad
+ */
+static const Uint8 xboxone_elite_series2_init[] = {
+    0x04, 0x20, 0x01, 0x00
+};
+
+/*
  * This packet is required for all Xbox One pads with 2015
  * or later firmware installed (or present from the factory).
  */
@@ -108,6 +115,7 @@ typedef struct {
 static const SDL_DriverXboxOne_InitPacket xboxone_init_packets[] = {
     { 0x0e6f, 0x0165, xboxone_hori_init, sizeof(xboxone_hori_init) },
     { 0x0f0d, 0x0067, xboxone_hori_init, sizeof(xboxone_hori_init) },
+    { 0x045e, 0x0b00, xboxone_elite_series2_init, sizeof(xboxone_elite_series2_init) },
     { 0x0000, 0x0000, xboxone_fw2015_init, sizeof(xboxone_fw2015_init) },
     { 0x0e6f, 0x0246, xboxone_pdp_init1, sizeof(xboxone_pdp_init1) },
     { 0x0e6f, 0x0246, xboxone_pdp_init2, sizeof(xboxone_pdp_init2) },
@@ -131,8 +139,28 @@ typedef struct {
 
 
 static SDL_bool
-HIDAPI_DriverXboxOne_IsSupportedDevice(Uint16 vendor_id, Uint16 product_id, Uint16 version, int interface_number)
+IsBluetoothXboxOneController(Uint16 vendor_id, Uint16 product_id)
 {
+    /* Check to see if it's the Xbox One S or Xbox One Elite Series 2 in Bluetooth mode */
+    const Uint16 USB_VENDOR_MICROSOFT = 0x045e;
+    const Uint16 USB_PRODUCT_XBOX_ONE_S = 0x02fd;
+    const Uint16 USB_PRODUCT_XBOX_ONE_ELITE_SERIES_2 = 0x0b05;
+
+    if (vendor_id == USB_VENDOR_MICROSOFT && (product_id == USB_PRODUCT_XBOX_ONE_S || product_id == USB_PRODUCT_XBOX_ONE_ELITE_SERIES_2)) {
+        return SDL_TRUE;
+    }
+    return SDL_FALSE;
+}
+
+static SDL_bool
+HIDAPI_DriverXboxOne_IsSupportedDevice(Uint16 vendor_id, Uint16 product_id, Uint16 version, int interface_number, const char *name)
+{
+#ifdef __LINUX__
+    if (IsBluetoothXboxOneController(vendor_id, product_id)) {
+        /* We can't do rumble on this device, hid_write() fails, so don't try to open it here */
+        return SDL_FALSE;
+    }
+#endif
     return SDL_IsJoystickXboxOne(vendor_id, product_id);
 }
 
@@ -156,16 +184,18 @@ HIDAPI_DriverXboxOne_Init(SDL_Joystick *joystick, hid_device *dev, Uint16 vendor
     }
     *context = ctx;
 
-    /* Send the controller init data */
-    for (i = 0; i < SDL_arraysize(xboxone_init_packets); ++i) {
-        const SDL_DriverXboxOne_InitPacket *packet = &xboxone_init_packets[i];
-        if (!packet->vendor_id || (vendor_id == packet->vendor_id && product_id == packet->product_id)) {
-            SDL_memcpy(init_packet, packet->data, packet->size);
-            init_packet[2] = ctx->sequence++;
-            if (hid_write(dev, init_packet, packet->size) != packet->size) {
-                SDL_SetError("Couldn't write Xbox One initialization packet");
-                SDL_free(ctx);
-                return SDL_FALSE;
+    if (!IsBluetoothXboxOneController(vendor_id, product_id)) {
+        /* Send the controller init data */
+        for (i = 0; i < SDL_arraysize(xboxone_init_packets); ++i) {
+            const SDL_DriverXboxOne_InitPacket *packet = &xboxone_init_packets[i];
+            if (!packet->vendor_id || (vendor_id == packet->vendor_id && product_id == packet->product_id)) {
+                SDL_memcpy(init_packet, packet->data, packet->size);
+                init_packet[2] = ctx->sequence++;
+                if (hid_write(dev, init_packet, packet->size) != packet->size) {
+                    SDL_SetError("Couldn't write Xbox One initialization packet");
+                    SDL_free(ctx);
+                    return SDL_FALSE;
+                }
             }
         }
     }
@@ -184,15 +214,10 @@ HIDAPI_DriverXboxOne_Rumble(SDL_Joystick *joystick, hid_device *dev, void *conte
     SDL_DriverXboxOne_Context *ctx = (SDL_DriverXboxOne_Context *)context;
     Uint8 rumble_packet[] = { 0x09, 0x00, 0x00, 0x09, 0x00, 0x0F, 0x00, 0x00, 0x00, 0x00, 0xFF, 0x00, 0xFF };
 
-    /* The Rock Candy Xbox One Controller limits the range of
-         low frequency rumble strength in the range of [0 - 0x99]
-         high frequency rumble strength in the range of [0 - 0x82]
-
-       I think the valid range of rumble at the firmware level is [0 - 0x7F]
-    */
+    /* Magnitude is 1..100 so scale the 16-bit input here */
     rumble_packet[2] = ctx->sequence++;
-    rumble_packet[8] = (low_frequency_rumble >> 9);
-    rumble_packet[9] = (high_frequency_rumble >> 9);
+    rumble_packet[8] = low_frequency_rumble / 655;
+    rumble_packet[9] = high_frequency_rumble / 655;
 
     if (hid_write(dev, rumble_packet, sizeof(rumble_packet)) != sizeof(rumble_packet)) {
         return SDL_SetError("Couldn't send rumble packet");
@@ -274,6 +299,16 @@ HIDAPI_DriverXboxOne_Update(SDL_Joystick *joystick, hid_device *dev, void *conte
     int size;
 
     while ((size = hid_read_timeout(dev, data, sizeof(data), 0)) > 0) {
+#ifdef DEBUG_XBOX_PROTOCOL
+        SDL_Log("Xbox One packet: size = %d\n"
+                "                 0x%.2x 0x%.2x 0x%.2x 0x%.2x 0x%.2x 0x%.2x 0x%.2x 0x%.2x\n"
+                "                 0x%.2x 0x%.2x 0x%.2x 0x%.2x 0x%.2x 0x%.2x 0x%.2x 0x%.2x\n"
+                "                 0x%.2x 0x%.2x 0x%.2x 0x%.2x\n",
+                    size,
+                    data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7],
+                    data[8], data[9], data[10], data[11], data[12], data[13], data[14], data[15],
+                    data[16], data[17], data[18], data[19]);
+#endif
         switch (data[0]) {
         case 0x20:
             HIDAPI_DriverXboxOne_HandleStatePacket(joystick, dev, ctx, data, size);

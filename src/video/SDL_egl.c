@@ -222,25 +222,35 @@ static SDL_bool SDL_EGL_HasExtension(_THIS, SDL_EGL_ExtensionType type, const ch
 void *
 SDL_EGL_GetProcAddress(_THIS, const char *proc)
 {
-    static char procname[1024];
-    void *retval;
-    
-    /* eglGetProcAddress is busted on Android http://code.google.com/p/android/issues/detail?id=7681 */
-#if !defined(SDL_VIDEO_DRIVER_ANDROID)
-    if (_this->egl_data->eglGetProcAddress) {
+    const Uint32 eglver = (((Uint32) _this->egl_data->egl_version_major) << 16) | ((Uint32) _this->egl_data->egl_version_minor);
+    const SDL_bool is_egl_15_or_later = eglver >= ((((Uint32) 1) << 16) | 5);
+    void *retval = NULL;
+
+    /* EGL 1.5 can use eglGetProcAddress() for any symbol. 1.4 and earlier can't use it for core entry points. */
+    if (!retval && is_egl_15_or_later && _this->egl_data->eglGetProcAddress) {
+        retval = _this->egl_data->eglGetProcAddress(proc);
+    }
+
+    /* Try SDL_LoadFunction() first for EGL <= 1.4, or as a fallback for >= 1.5. */
+    if (!retval) {
+        static char procname[64];
+        retval = SDL_LoadFunction(_this->egl_data->egl_dll_handle, proc);
+        /* just in case you need an underscore prepended... */
+        if (!retval && (SDL_strlen(proc) < (sizeof (procname) - 1))) {
+            procname[0] = '_';
+            SDL_strlcpy(procname + 1, proc, sizeof (procname) - 1);
+            retval = SDL_LoadFunction(_this->egl_data->egl_dll_handle, procname);
+        }
+    }
+
+    /* Try eglGetProcAddress if we on <= 1.4 and still searching... */
+    if (!retval && !is_egl_15_or_later && _this->egl_data->eglGetProcAddress) {
         retval = _this->egl_data->eglGetProcAddress(proc);
         if (retval) {
             return retval;
         }
     }
-#endif
-    
-    retval = SDL_LoadFunction(_this->egl_data->egl_dll_handle, proc);
-    if (!retval && SDL_strlen(proc) <= 1022) {
-        procname[0] = '_';
-        SDL_strlcpy(procname + 1, proc, 1022);
-        retval = SDL_LoadFunction(_this->egl_data->egl_dll_handle, procname);
-    }
+
     return retval;
 }
 
@@ -434,29 +444,36 @@ SDL_EGL_LoadLibraryOnly(_THIS, const char *egl_path)
     return 0;
 }
 
+static void
+SDL_EGL_GetVersion(_THIS) {
+    if (_this->egl_data->eglQueryString) {
+        const char *egl_version = _this->egl_data->eglQueryString(_this->egl_data->egl_display, EGL_VERSION);
+        if (egl_version) {
+            int major = 0, minor = 0;
+            if (SDL_sscanf(egl_version, "%d.%d", &major, &minor) == 2) {
+                _this->egl_data->egl_version_major = major;
+                _this->egl_data->egl_version_minor = minor;
+            } else {
+                SDL_LogWarn(SDL_LOG_CATEGORY_VIDEO, "Could not parse EGL version string: %s", egl_version);
+            }
+        }
+    }
+}
+
 int
 SDL_EGL_LoadLibrary(_THIS, const char *egl_path, NativeDisplayType native_display, EGLenum platform)
 {
-    int egl_version_major = 0, egl_version_minor = 0;
+    int egl_version_major, egl_version_minor;
     int library_load_retcode = SDL_EGL_LoadLibraryOnly(_this, egl_path);
     if (library_load_retcode != 0) {
         return library_load_retcode;
     }
 
-    if (_this->egl_data->eglQueryString) {
-        /* EGL 1.5 allows querying for client version */
-        const char *egl_version = _this->egl_data->eglQueryString(EGL_NO_DISPLAY, EGL_VERSION);
-        if (egl_version != NULL) {
-            if (SDL_sscanf(egl_version, "%d.%d", &egl_version_major, &egl_version_minor) != 2) {
-                egl_version_major = 0;
-                egl_version_minor = 0;
-                SDL_LogWarn(SDL_LOG_CATEGORY_VIDEO, "Could not parse EGL version string: %s", egl_version);
-            }
-        }
-    }
+    /* EGL 1.5 allows querying for client version with EGL_NO_DISPLAY */
+    SDL_EGL_GetVersion(_this);
 
-    _this->egl_data->egl_version_major = egl_version_major;
-    _this->egl_data->egl_version_minor = egl_version_minor;
+    egl_version_major = _this->egl_data->egl_version_major;
+    egl_version_minor = _this->egl_data->egl_version_minor;
 
     if (egl_version_major == 1 && egl_version_minor == 5) {
         LOAD_FUNC(eglGetPlatformDisplay);
@@ -492,6 +509,9 @@ SDL_EGL_LoadLibrary(_THIS, const char *egl_path, NativeDisplayType native_displa
         return SDL_SetError("Could not initialize EGL");
     }
 #endif
+
+    /* Get the EGL version with a valid egl_display, for EGL <= 1.4 */
+    SDL_EGL_GetVersion(_this);
 
     _this->egl_data->is_offscreen = 0;
 
@@ -577,6 +597,9 @@ SDL_EGL_InitializeOffscreen(_THIS, int device)
             return SDL_SetError("Could not find a valid EGL device to initialize");
         }
     }
+
+    /* Get the EGL version with a valid egl_display, for EGL <= 1.4 */
+    SDL_EGL_GetVersion(_this);
 
     _this->egl_data->is_offscreen = 1;
 
