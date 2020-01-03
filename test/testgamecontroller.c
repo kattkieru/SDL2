@@ -292,14 +292,33 @@ main(int argc, char *argv[])
         {
             nController++;
             name = SDL_GameControllerNameForIndex(i);
-            description = "Controller";
+            switch (SDL_GameControllerTypeForIndex(i)) {
+            case SDL_CONTROLLER_TYPE_XBOX360:
+                description = "XBox 360 Controller";
+                break;
+            case SDL_CONTROLLER_TYPE_XBOXONE:
+                description = "XBox One Controller";
+                break;
+            case SDL_CONTROLLER_TYPE_PS3:
+                description = "PS3 Controller";
+                break;
+            case SDL_CONTROLLER_TYPE_PS4:
+                description = "PS4 Controller";
+                break;
+            case SDL_CONTROLLER_TYPE_NINTENDO_SWITCH_PRO:
+                description = "Nintendo Switch Pro Controller";
+                break;
+            default:
+                description = "Game Controller";
+                break;
+            }
         } else {
             name = SDL_JoystickNameForIndex(i);
             description = "Joystick";
         }
-        SDL_Log("%s %d: %s (guid %s, VID 0x%.4x, PID 0x%.4x)\n",
+        SDL_Log("%s %d: %s (guid %s, VID 0x%.4x, PID 0x%.4x, player index = %d)\n",
             description, i, name ? name : "Unknown", guid,
-            SDL_JoystickGetDeviceVendor(i), SDL_JoystickGetDeviceProduct(i));
+            SDL_JoystickGetDeviceVendor(i), SDL_JoystickGetDeviceProduct(i), SDL_JoystickGetDevicePlayerIndex(i));
     }
     SDL_Log("There are %d game controller(s) attached (%d joystick(s))\n", nController, SDL_NumJoysticks());
 
