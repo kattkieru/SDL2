@@ -1,6 +1,6 @@
 /*
   Simple DirectMedia Layer
-  Copyright (C) 1997-2019 Sam Lantinga <slouken@libsdl.org>
+  Copyright (C) 1997-2020 Sam Lantinga <slouken@libsdl.org>
 
   This software is provided 'as-is', without any express or implied
   warranty.  In no event will the authors be held liable for any damages
@@ -30,27 +30,26 @@
 #include "SDL_gamecontroller.h"
 #include "../SDL_sysjoystick.h"
 #include "SDL_hidapijoystick_c.h"
+#include "SDL_hidapi_rumble.h"
 
 
 #ifdef SDL_JOYSTICK_HIDAPI_XBOX360
-
-#define USB_PACKET_LENGTH   64
 
 
 typedef struct {
     SDL_bool connected;
     Uint8 last_state[USB_PACKET_LENGTH];
-    Uint32 rumble_expiration;
 } SDL_DriverXbox360W_Context;
 
 
 static SDL_bool
-HIDAPI_DriverXbox360W_IsSupportedDevice(Uint16 vendor_id, Uint16 product_id, Uint16 version, int interface_number, const char *name)
+HIDAPI_DriverXbox360W_IsSupportedDevice(const char *name, SDL_GameControllerType type, Uint16 vendor_id, Uint16 product_id, Uint16 version, int interface_number, int interface_class, int interface_subclass, int interface_protocol)
 {
-    const Uint16 MICROSOFT_USB_VID = 0x045e;
+    const int XB360W_IFACE_PROTOCOL = 129; /* Wireless */
 
-    if (vendor_id == MICROSOFT_USB_VID) {
-        return (product_id == 0x0291 || product_id == 0x0719);
+    if ((vendor_id == USB_VENDOR_MICROSOFT && (product_id == 0x0291 || product_id == 0x02a9 || product_id == 0x0719)) ||
+        (type == SDL_CONTROLLER_TYPE_XBOX360 && interface_protocol == XB360W_IFACE_PROTOCOL)) {
+        return SDL_TRUE;
     }
     return SDL_FALSE;
 }
@@ -146,26 +145,15 @@ HIDAPI_DriverXbox360W_OpenJoystick(SDL_HIDAPI_Device *device, SDL_Joystick *joys
 }
 
 static int
-HIDAPI_DriverXbox360W_RumbleJoystick(SDL_HIDAPI_Device *device, SDL_Joystick *joystick, Uint16 low_frequency_rumble, Uint16 high_frequency_rumble, Uint32 duration_ms)
+HIDAPI_DriverXbox360W_RumbleJoystick(SDL_HIDAPI_Device *device, SDL_Joystick *joystick, Uint16 low_frequency_rumble, Uint16 high_frequency_rumble)
 {
-    SDL_DriverXbox360W_Context *ctx = (SDL_DriverXbox360W_Context *)device->context;
-
     Uint8 rumble_packet[] = { 0x00, 0x01, 0x0f, 0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
 
     rumble_packet[5] = (low_frequency_rumble >> 8);
     rumble_packet[6] = (high_frequency_rumble >> 8);
 
-    if (hid_write(device->dev, rumble_packet, sizeof(rumble_packet)) != sizeof(rumble_packet)) {
+    if (SDL_HIDAPI_SendRumble(device, rumble_packet, sizeof(rumble_packet)) != sizeof(rumble_packet)) {
         return SDL_SetError("Couldn't send rumble packet");
-    }
-
-    if ((low_frequency_rumble || high_frequency_rumble) && duration_ms) {
-        ctx->rumble_expiration = SDL_GetTicks() + SDL_min(duration_ms, SDL_MAX_RUMBLE_DURATION_MS);
-        if (!ctx->rumble_expiration) {
-            ctx->rumble_expiration = 1;
-        }
-    } else {
-        ctx->rumble_expiration = 0;
     }
     return 0;
 }
@@ -245,9 +233,6 @@ HIDAPI_DriverXbox360W_UpdateDevice(SDL_HIDAPI_Device *device)
 
                     HIDAPI_JoystickConnected(device, &joystickID);
 
-                    /* Set the controller LED */
-                    SetSlotLED(device->dev, joystickID);
-
                 } else if (device->num_joysticks > 0) {
                     HIDAPI_JoystickDisconnected(device, device->joysticks[0]);
                 }
@@ -275,13 +260,6 @@ HIDAPI_DriverXbox360W_UpdateDevice(SDL_HIDAPI_Device *device)
     }
 
     if (joystick) {
-        if (ctx->rumble_expiration) {
-            Uint32 now = SDL_GetTicks();
-            if (SDL_TICKS_PASSED(now, ctx->rumble_expiration)) {
-                HIDAPI_DriverXbox360W_RumbleJoystick(device, joystick, 0, 0, 0);
-            }
-        }
-
         if (size < 0) {
             /* Read error, device is disconnected */
             HIDAPI_JoystickDisconnected(device, joystick->instance_id);

@@ -1,6 +1,6 @@
 /*
   Simple DirectMedia Layer
-  Copyright (C) 1997-2019 Sam Lantinga <slouken@libsdl.org>
+  Copyright (C) 1997-2020 Sam Lantinga <slouken@libsdl.org>
 
   This software is provided 'as-is', without any express or implied
   warranty.  In no event will the authors be held liable for any damages
@@ -30,6 +30,7 @@
 #include "SDL_gamecontroller.h"
 #include "../SDL_sysjoystick.h"
 #include "SDL_hidapijoystick_c.h"
+#include "SDL_hidapi_rumble.h"
 
 
 #ifdef SDL_JOYSTICK_HIDAPI_XBOX360
@@ -50,12 +51,9 @@
 #include "windows.gaming.input.h"
 #endif
 
-#define USB_PACKET_LENGTH   64
-
 
 typedef struct {
     Uint8 last_state[USB_PACKET_LENGTH];
-    Uint32 rumble_expiration;
 #ifdef SDL_JOYSTICK_HIDAPI_WINDOWS_XINPUT
     SDL_bool xinput_enabled;
     Uint8 xinput_slot;
@@ -247,32 +245,29 @@ HIDAPI_DriverXbox360_QuitWindowsGamingInput(SDL_DriverXbox360_Context *ctx)
 #endif /* SDL_JOYSTICK_HIDAPI_WINDOWS_GAMING_INPUT */
 
 static SDL_bool
-HIDAPI_DriverXbox360_IsSupportedDevice(Uint16 vendor_id, Uint16 product_id, Uint16 version, int interface_number, const char *name)
+HIDAPI_DriverXbox360_IsSupportedDevice(const char *name, SDL_GameControllerType type, Uint16 vendor_id, Uint16 product_id, Uint16 version, int interface_number, int interface_class, int interface_subclass, int interface_protocol)
 {
-    SDL_GameControllerType type = SDL_GetJoystickGameControllerType(vendor_id, product_id, name);
-    const Uint16 MICROSOFT_USB_VID = 0x045e;
-    const Uint16 NVIDIA_USB_VID = 0x0955;
+    const int XB360W_IFACE_PROTOCOL = 129; /* Wireless */
 
-    if (vendor_id == NVIDIA_USB_VID) {
+    if (vendor_id == USB_VENDOR_NVIDIA) {
         /* This is the NVIDIA Shield controller which doesn't talk Xbox controller protocol */
         return SDL_FALSE;
     }
-    if (vendor_id == MICROSOFT_USB_VID) {
-        if (product_id == 0x0291 || product_id == 0x0719) {
-            /* This is the wireless dongle, which talks a different protocol */
-            return SDL_FALSE;
-        }
+    if ((vendor_id == USB_VENDOR_MICROSOFT && (product_id == 0x0291 || product_id == 0x0719)) ||
+        (type == SDL_CONTROLLER_TYPE_XBOX360 && interface_protocol == XB360W_IFACE_PROTOCOL)) {
+        /* This is the wireless dongle, which talks a different protocol */
+        return SDL_FALSE;
     }
     if (interface_number > 0) {
         /* This is the chatpad or other input interface, not the Xbox 360 interface */
         return SDL_FALSE;
     }
 #if defined(__MACOSX__) || defined(__WIN32__)
-    if (vendor_id == 0x045e && product_id == 0x028e && version == 1) {
+    if (vendor_id == USB_VENDOR_MICROSOFT && product_id == 0x028e && version == 1) {
         /* This is the Steam Virtual Gamepad, which isn't supported by this driver */
         return SDL_FALSE;
     }
-    if (vendor_id == 0x045e && product_id == 0x02e0) {
+    if (vendor_id == USB_VENDOR_MICROSOFT && product_id == 0x02e0) {
         /* This is the old Bluetooth Xbox One S firmware, which isn't supported by this driver */
         return SDL_FALSE;
     }
@@ -365,9 +360,11 @@ HIDAPI_DriverXbox360_OpenJoystick(SDL_HIDAPI_Device *device, SDL_Joystick *joyst
 }
 
 static int
-HIDAPI_DriverXbox360_RumbleJoystick(SDL_HIDAPI_Device *device, SDL_Joystick *joystick, Uint16 low_frequency_rumble, Uint16 high_frequency_rumble, Uint32 duration_ms)
+HIDAPI_DriverXbox360_RumbleJoystick(SDL_HIDAPI_Device *device, SDL_Joystick *joystick, Uint16 low_frequency_rumble, Uint16 high_frequency_rumble)
 {
+#if defined(SDL_JOYSTICK_HIDAPI_WINDOWS_GAMING_INPUT) || defined(SDL_JOYSTICK_HIDAPI_WINDOWS_XINPUT)
     SDL_DriverXbox360_Context *ctx = (SDL_DriverXbox360_Context *)device->context;
+#endif
 
 #ifdef __WIN32__
     SDL_bool rumbled = SDL_FALSE;
@@ -420,19 +417,11 @@ HIDAPI_DriverXbox360_RumbleJoystick(SDL_HIDAPI_Device *device, SDL_Joystick *joy
     rumble_packet[4] = (high_frequency_rumble >> 8);
 #endif
 
-    if (hid_write(device->dev, rumble_packet, sizeof(rumble_packet)) != sizeof(rumble_packet)) {
+    if (SDL_HIDAPI_SendRumble(device, rumble_packet, sizeof(rumble_packet)) != sizeof(rumble_packet)) {
         return SDL_SetError("Couldn't send rumble packet");
     }
 #endif /* __WIN32__ */
 
-    if ((low_frequency_rumble || high_frequency_rumble) && duration_ms) {
-        ctx->rumble_expiration = SDL_GetTicks() + SDL_min(duration_ms, SDL_MAX_RUMBLE_DURATION_MS);
-        if (!ctx->rumble_expiration) {
-            ctx->rumble_expiration = 1;
-        }
-    } else {
-        ctx->rumble_expiration = 0;
-    }
     return 0;
 }
 
@@ -803,13 +792,6 @@ HIDAPI_DriverXbox360_UpdateDevice(SDL_HIDAPI_Device *device)
             break;
         }
 #endif /* __WIN32__ */
-    }
-
-    if (ctx->rumble_expiration) {
-        Uint32 now = SDL_GetTicks();
-        if (SDL_TICKS_PASSED(now, ctx->rumble_expiration)) {
-            HIDAPI_DriverXbox360_RumbleJoystick(device, joystick, 0, 0, 0);
-        }
     }
 
     if (size < 0) {
