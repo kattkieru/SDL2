@@ -1,6 +1,6 @@
 /*
   Simple DirectMedia Layer
-  Copyright (C) 1997-2020 Sam Lantinga <slouken@libsdl.org>
+  Copyright (C) 1997-2021 Sam Lantinga <slouken@libsdl.org>
 
   This software is provided 'as-is', without any express or implied
   warranty.  In no event will the authors be held liable for any damages
@@ -26,6 +26,7 @@
 
 #include "SDL_windowsjoystick_c.h"
 #include "SDL_dinputjoystick_c.h"
+#include "SDL_rawinputjoystick_c.h"
 #include "SDL_xinputjoystick_c.h"
 #include "../hidapi/SDL_hidapijoystick_c.h"
 
@@ -49,14 +50,14 @@ static UINT SDL_RawDevListCount = 0;
 
 /* Taken from Wine - Thanks! */
 static DIOBJECTDATAFORMAT dfDIJoystick2[] = {
-    { &GUID_XAxis, DIJOFS_X, DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, 0 },
-    { &GUID_YAxis, DIJOFS_Y, DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, 0 },
-    { &GUID_ZAxis, DIJOFS_Z, DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, 0 },
-    { &GUID_RxAxis, DIJOFS_RX, DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, 0 },
-    { &GUID_RyAxis, DIJOFS_RY, DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, 0 },
-    { &GUID_RzAxis, DIJOFS_RZ, DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, 0 },
-    { &GUID_Slider, DIJOFS_SLIDER(0), DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, 0 },
-    { &GUID_Slider, DIJOFS_SLIDER(1), DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, 0 },
+    { &GUID_XAxis, DIJOFS_X, DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, DIDOI_ASPECTPOSITION },
+    { &GUID_YAxis, DIJOFS_Y, DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, DIDOI_ASPECTPOSITION },
+    { &GUID_ZAxis, DIJOFS_Z, DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, DIDOI_ASPECTPOSITION },
+    { &GUID_RxAxis, DIJOFS_RX, DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, DIDOI_ASPECTPOSITION },
+    { &GUID_RyAxis, DIJOFS_RY, DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, DIDOI_ASPECTPOSITION },
+    { &GUID_RzAxis, DIJOFS_RZ, DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, DIDOI_ASPECTPOSITION },
+    { &GUID_Slider, DIJOFS_SLIDER(0), DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, DIDOI_ASPECTPOSITION },
+    { &GUID_Slider, DIJOFS_SLIDER(1), DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, DIDOI_ASPECTPOSITION },
     { &GUID_POV, DIJOFS_POV(0), DIDFT_OPTIONAL | DIDFT_POV | DIDFT_ANYINSTANCE, 0 },
     { &GUID_POV, DIJOFS_POV(1), DIDFT_OPTIONAL | DIDFT_POV | DIDFT_ANYINSTANCE, 0 },
     { &GUID_POV, DIJOFS_POV(2), DIDFT_OPTIONAL | DIDFT_POV | DIDFT_ANYINSTANCE, 0 },
@@ -189,30 +190,33 @@ static DIOBJECTDATAFORMAT dfDIJoystick2[] = {
     { NULL, DIJOFS_BUTTON(125), DIDFT_OPTIONAL | DIDFT_BUTTON | DIDFT_ANYINSTANCE, 0 },
     { NULL, DIJOFS_BUTTON(126), DIDFT_OPTIONAL | DIDFT_BUTTON | DIDFT_ANYINSTANCE, 0 },
     { NULL, DIJOFS_BUTTON(127), DIDFT_OPTIONAL | DIDFT_BUTTON | DIDFT_ANYINSTANCE, 0 },
-    { &GUID_XAxis, FIELD_OFFSET(DIJOYSTATE2, lVX), DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, 0 },
-    { &GUID_YAxis, FIELD_OFFSET(DIJOYSTATE2, lVY), DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, 0 },
-    { &GUID_ZAxis, FIELD_OFFSET(DIJOYSTATE2, lVZ), DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, 0 },
-    { &GUID_RxAxis, FIELD_OFFSET(DIJOYSTATE2, lVRx), DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, 0 },
-    { &GUID_RyAxis, FIELD_OFFSET(DIJOYSTATE2, lVRy), DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, 0 },
-    { &GUID_RzAxis, FIELD_OFFSET(DIJOYSTATE2, lVRz), DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, 0 },
-    { &GUID_Slider, FIELD_OFFSET(DIJOYSTATE2, rglVSlider[0]), DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, 0 },
-    { &GUID_Slider, FIELD_OFFSET(DIJOYSTATE2, rglVSlider[1]), DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, 0 },
-    { &GUID_XAxis, FIELD_OFFSET(DIJOYSTATE2, lAX), DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, 0 },
-    { &GUID_YAxis, FIELD_OFFSET(DIJOYSTATE2, lAY), DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, 0 },
-    { &GUID_ZAxis, FIELD_OFFSET(DIJOYSTATE2, lAZ), DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, 0 },
-    { &GUID_RxAxis, FIELD_OFFSET(DIJOYSTATE2, lARx), DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, 0 },
-    { &GUID_RyAxis, FIELD_OFFSET(DIJOYSTATE2, lARy), DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, 0 },
-    { &GUID_RzAxis, FIELD_OFFSET(DIJOYSTATE2, lARz), DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, 0 },
-    { &GUID_Slider, FIELD_OFFSET(DIJOYSTATE2, rglASlider[0]), DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, 0 },
-    { &GUID_Slider, FIELD_OFFSET(DIJOYSTATE2, rglASlider[1]), DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, 0 },
-    { &GUID_XAxis, FIELD_OFFSET(DIJOYSTATE2, lFX), DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, 0 },
-    { &GUID_YAxis, FIELD_OFFSET(DIJOYSTATE2, lFY), DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, 0 },
-    { &GUID_ZAxis, FIELD_OFFSET(DIJOYSTATE2, lFZ), DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, 0 },
-    { &GUID_RxAxis, FIELD_OFFSET(DIJOYSTATE2, lFRx), DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, 0 },
-    { &GUID_RyAxis, FIELD_OFFSET(DIJOYSTATE2, lFRy), DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, 0 },
-    { &GUID_RzAxis, FIELD_OFFSET(DIJOYSTATE2, lFRz), DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, 0 },
-    { &GUID_Slider, FIELD_OFFSET(DIJOYSTATE2, rglFSlider[0]), DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, 0 },
-    { &GUID_Slider, FIELD_OFFSET(DIJOYSTATE2, rglFSlider[1]), DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, 0 },
+    { &GUID_XAxis, FIELD_OFFSET(DIJOYSTATE2, lVX), DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, DIDOI_ASPECTVELOCITY },
+    { &GUID_YAxis, FIELD_OFFSET(DIJOYSTATE2, lVY), DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, DIDOI_ASPECTVELOCITY },
+    { &GUID_ZAxis, FIELD_OFFSET(DIJOYSTATE2, lVZ), DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, DIDOI_ASPECTVELOCITY },
+    { &GUID_RxAxis, FIELD_OFFSET(DIJOYSTATE2, lVRx), DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, DIDOI_ASPECTVELOCITY },
+    { &GUID_RyAxis, FIELD_OFFSET(DIJOYSTATE2, lVRy), DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, DIDOI_ASPECTVELOCITY },
+    { &GUID_RzAxis, FIELD_OFFSET(DIJOYSTATE2, lVRz), DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, DIDOI_ASPECTVELOCITY },
+    /* note: dwOfs value matches Windows */
+    { &GUID_Slider, DIJOFS_SLIDER(0), DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, DIDOI_ASPECTVELOCITY },
+    { &GUID_Slider, DIJOFS_SLIDER(1), DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, DIDOI_ASPECTVELOCITY },
+    { &GUID_XAxis, FIELD_OFFSET(DIJOYSTATE2, lAX), DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, DIDOI_ASPECTACCEL },
+    { &GUID_YAxis, FIELD_OFFSET(DIJOYSTATE2, lAY), DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, DIDOI_ASPECTACCEL },
+    { &GUID_ZAxis, FIELD_OFFSET(DIJOYSTATE2, lAZ), DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, DIDOI_ASPECTACCEL },
+    { &GUID_RxAxis, FIELD_OFFSET(DIJOYSTATE2, lARx), DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, DIDOI_ASPECTACCEL },
+    { &GUID_RyAxis, FIELD_OFFSET(DIJOYSTATE2, lARy), DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, DIDOI_ASPECTACCEL },
+    { &GUID_RzAxis, FIELD_OFFSET(DIJOYSTATE2, lARz), DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, DIDOI_ASPECTACCEL },
+    /* note: dwOfs value matches Windows */
+    { &GUID_Slider, DIJOFS_SLIDER(0), DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, DIDOI_ASPECTACCEL },
+    { &GUID_Slider, DIJOFS_SLIDER(1), DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, DIDOI_ASPECTACCEL },
+    { &GUID_XAxis, FIELD_OFFSET(DIJOYSTATE2, lFX), DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, DIDOI_ASPECTFORCE },
+    { &GUID_YAxis, FIELD_OFFSET(DIJOYSTATE2, lFY), DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, DIDOI_ASPECTFORCE },
+    { &GUID_ZAxis, FIELD_OFFSET(DIJOYSTATE2, lFZ), DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, DIDOI_ASPECTFORCE },
+    { &GUID_RxAxis, FIELD_OFFSET(DIJOYSTATE2, lFRx), DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, DIDOI_ASPECTFORCE },
+    { &GUID_RyAxis, FIELD_OFFSET(DIJOYSTATE2, lFRy), DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, DIDOI_ASPECTFORCE },
+    { &GUID_RzAxis, FIELD_OFFSET(DIJOYSTATE2, lFRz), DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, DIDOI_ASPECTFORCE },
+    /* note: dwOfs value matches Windows */
+    { &GUID_Slider, DIJOFS_SLIDER(0), DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, DIDOI_ASPECTFORCE },
+    { &GUID_Slider, DIJOFS_SLIDER(1), DIDFT_OPTIONAL | DIDFT_AXIS | DIDFT_ANYINSTANCE, DIDOI_ASPECTFORCE },
 };
 
 const DIDATAFORMAT SDL_c_dfDIJoystick2 = {
@@ -228,10 +232,6 @@ const DIDATAFORMAT SDL_c_dfDIJoystick2 = {
 static int
 SetDIerror(const char *function, HRESULT code)
 {
-    /*
-    return SDL_SetError("%s() [%s]: %s", function,
-    DXGetErrorString9A(code), DXGetErrorDescription9A(code));
-    */
     return SDL_SetError("%s() DirectX error 0x%8.8lx", function, code);
 }
 
@@ -244,7 +244,7 @@ static const IID CLSID_WbemLocator = { 0x4590f811, 0x1d3a, 0x11d0,{ 0x89, 0x1f, 
 static const IID IID_IWbemLocator = { 0xdc12a687, 0x737f, 0x11cf,{ 0x88, 0x4d, 0x00, 0xaa, 0x00, 0x4b, 0x2e, 0x24 } };
 
 static SDL_bool
-WIN_IsXInputDevice(const GUID* pGuidProductFromDirectInput)
+WIN_IsXInputDevice(const TCHAR *name, const GUID* pGuidProductFromDirectInput)
 {
     IWbemLocator*           pIWbemLocator = NULL;
     IEnumWbemClassObject*   pEnumDevices = NULL;
@@ -258,6 +258,17 @@ WIN_IsXInputDevice(const GUID* pGuidProductFromDirectInput)
     UINT                    iDevice = 0;
     VARIANT                 var;
     HRESULT                 hr;
+
+    if (!SDL_XINPUT_Enabled()) {
+        return SDL_FALSE;
+    }
+
+    if (SDL_tcsstr(name, TEXT(" XINPUT ")) != NULL) {
+        /* This is a duplicate interface for a controller that will show up with XInput,
+           e.g. Xbox One Elite Series 2 in Bluetooth mode.
+         */
+        return SDL_TRUE;
+    }
 
     SDL_zeroa(pDevices);
 
@@ -307,7 +318,7 @@ WIN_IsXInputDevice(const GUID* pGuidProductFromDirectInput)
                 // Check if the device ID contains "IG_".  If it does, then it's an XInput device
                 // This information can not be found from DirectInput 
                 if (SDL_wcsstr(var.bstrVal, L"IG_")) {
-                    char *bstrVal = WIN_StringToUTF8(var.bstrVal);
+                    char *bstrVal = WIN_StringToUTF8W(var.bstrVal);
 
                     // If it does, then get the VID/PID from var.bstrVal
                     DWORD dwPid = 0, dwVid = 0, dwVidPid;
@@ -363,12 +374,19 @@ LCleanup:
 #endif /* 0 */
 
 static SDL_bool
-SDL_IsXInputDevice(const GUID* pGuidProductFromDirectInput)
+SDL_IsXInputDevice(const TCHAR *name, const GUID* pGuidProductFromDirectInput)
 {
     UINT i;
 
     if (!SDL_XINPUT_Enabled()) {
         return SDL_FALSE;
+    }
+
+    if (SDL_tcsstr(name, TEXT(" XINPUT ")) != NULL) {
+        /* This is a duplicate interface for a controller that will show up with XInput,
+           e.g. Xbox One Elite Series 2 in Bluetooth mode.
+         */
+        return SDL_TRUE;
     }
 
     if (SDL_memcmp(&pGuidProductFromDirectInput->Data4[2], "PIDVID", 6) == 0) {
@@ -404,7 +422,7 @@ SDL_IsXInputDevice(const GUID* pGuidProductFromDirectInput)
 
     for (i = 0; i < SDL_RawDevListCount; i++) {
         RID_DEVICE_INFO rdi;
-        char devName[128];
+        char devName[MAX_PATH];
         UINT rdiSize = sizeof(rdi);
         UINT nameSize = SDL_arraysize(devName);
 
@@ -490,7 +508,7 @@ SDL_DINPUT_JoystickInit(void)
     coinitialized = SDL_TRUE;
 
     result = CoCreateInstance(&CLSID_DirectInput8, NULL, CLSCTX_INPROC_SERVER,
-        &IID_IDirectInput8, (LPVOID)&dinput);
+        &IID_IDirectInput8, (LPVOID *)&dinput);
 
     if (FAILED(result)) {
         return SetDIerror("CoCreateInstance", result);
@@ -499,11 +517,15 @@ SDL_DINPUT_JoystickInit(void)
     /* Because we used CoCreateInstance, we need to Initialize it, first. */
     instance = GetModuleHandle(NULL);
     if (instance == NULL) {
+        IDirectInput8_Release(dinput);
+        dinput = NULL;
         return SDL_SetError("GetModuleHandle() failed with error code %lu.", GetLastError());
     }
     result = IDirectInput8_Initialize(dinput, instance, DIRECTINPUT_VERSION);
 
     if (FAILED(result)) {
+        IDirectInput8_Release(dinput);
+        dinput = NULL;
         return SetDIerror("IDirectInput::Initialize", result);
     }
     return 0;
@@ -521,7 +543,7 @@ EnumJoysticksCallback(const DIDEVICEINSTANCE * pdidInstance, VOID * pContext)
     Uint16 product = 0;
     Uint16 version = 0;
     WCHAR hidPath[MAX_PATH];
-    const char *name;
+    char *name;
 
     if (devtype == DI8DEVTYPE_SUPPLEMENTAL) {
         /* Add any supplemental devices that should be ignored here */
@@ -539,7 +561,7 @@ EnumJoysticksCallback(const DIDEVICEINSTANCE * pdidInstance, VOID * pContext)
         }
     }
 
-    if (SDL_IsXInputDevice(&pdidInstance->guidProduct)) {
+    if (SDL_IsXInputDevice(pdidInstance->tszProductName, &pdidInstance->guidProduct)) {
         return DIENUM_CONTINUE;  /* ignore XInput devices here, keep going. */
     }
 
@@ -586,8 +608,8 @@ EnumJoysticksCallback(const DIDEVICEINSTANCE * pdidInstance, VOID * pContext)
                 pPrevJoystick->pNext = pNewJoystick->pNext;
             }
 
-            // Update with new guid/etc, if it has changed
-            pNewJoystick->dxdevice = *pdidInstance;
+            /* Update with new guid/etc, if it has changed */
+            SDL_memcpy(&pNewJoystick->dxdevice, pdidInstance, sizeof(DIDEVICEINSTANCE));
 
             pNewJoystick->pNext = SYS_Joystick;
             SYS_Joystick = pNewJoystick;
@@ -609,12 +631,22 @@ EnumJoysticksCallback(const DIDEVICEINSTANCE * pdidInstance, VOID * pContext)
     SDL_memcpy(&pNewJoystick->dxdevice, pdidInstance, sizeof(DIDEVICEINSTANCE));
     SDL_memset(pNewJoystick->guid.data, 0, sizeof(pNewJoystick->guid.data));
 
-    guid16 = (Uint16 *)pNewJoystick->guid.data;
     if (SDL_memcmp(&pdidInstance->guidProduct.Data4[2], "PIDVID", 6) == 0) {
         vendor = (Uint16)LOWORD(pdidInstance->guidProduct.Data1);
         product = (Uint16)HIWORD(pdidInstance->guidProduct.Data1);
-        version = 0;
+    }
 
+    name = WIN_StringToUTF8(pdidInstance->tszProductName);
+    pNewJoystick->joystickname = SDL_CreateJoystickName(vendor, product, NULL, name);
+    SDL_free(name);
+
+    if (!pNewJoystick->joystickname) {
+        SDL_free(pNewJoystick);
+        return DIENUM_CONTINUE; /* better luck next time? */
+    }
+
+    guid16 = (Uint16 *)pNewJoystick->guid.data;
+    if (SDL_memcmp(&pdidInstance->guidProduct.Data4[2], "PIDVID", 6) == 0) {
         *guid16++ = SDL_SwapLE16(SDL_HARDWARE_BUS_USB);
         *guid16++ = 0;
         *guid16++ = SDL_SwapLE16(vendor);
@@ -629,26 +661,6 @@ EnumJoysticksCallback(const DIDEVICEINSTANCE * pdidInstance, VOID * pContext)
         SDL_strlcpy((char*)guid16, pNewJoystick->joystickname, sizeof(pNewJoystick->guid.data) - 4);
     }
 
-    name = SDL_GetCustomJoystickName(vendor, product);
-    if (name) {
-        pNewJoystick->joystickname = SDL_strdup(name);
-    } else {
-        pNewJoystick->joystickname = WIN_StringToUTF8(pdidInstance->tszProductName);
-    }
-    if (!pNewJoystick->joystickname) {
-        SDL_free(pNewJoystick);
-        return DIENUM_CONTINUE; /* better luck next time? */
-    }
-
-    if (SDL_strstr(pNewJoystick->joystickname, " XINPUT ") != NULL) {
-        /* This is a duplicate interface for a controller that will show up with XInput,
-           e.g. Xbox One Elite Series 2 in Bluetooth mode.
-         */
-        SDL_free(pNewJoystick->joystickname);
-        SDL_free(pNewJoystick);
-        return DIENUM_CONTINUE;
-    }
-
     if (SDL_ShouldIgnoreJoystick(pNewJoystick->joystickname, pNewJoystick->guid)) {
         SDL_free(pNewJoystick->joystickname);
         SDL_free(pNewJoystick);
@@ -659,6 +671,14 @@ EnumJoysticksCallback(const DIDEVICEINSTANCE * pdidInstance, VOID * pContext)
     if (HIDAPI_IsDevicePresent(vendor, product, 0, pNewJoystick->joystickname)) {
         /* The HIDAPI driver is taking care of this device */
         SDL_free(pNewJoystick->joystickname);
+        SDL_free(pNewJoystick);
+        return DIENUM_CONTINUE;
+    }
+#endif
+
+#ifdef SDL_JOYSTICK_RAWINPUT
+    if (RAWINPUT_IsDevicePresent(vendor, product, 0, pNewJoystick->joystickname)) {
+        /* The RAWINPUT driver is taking care of this device */
         SDL_free(pNewJoystick);
         return DIENUM_CONTINUE;
     }
@@ -679,6 +699,51 @@ SDL_DINPUT_JoystickDetect(JoyStick_DeviceData **pContext)
         SDL_RawDevList = NULL;
     }
     SDL_RawDevListCount = 0;
+}
+
+typedef struct
+{
+    Uint16 vendor;
+    Uint16 product;
+    Uint16 version;
+    SDL_bool present;
+} EnumJoystickPresentData;
+
+static BOOL CALLBACK
+EnumJoystickPresentCallback(const DIDEVICEINSTANCE * pdidInstance, VOID * pContext)
+{
+    EnumJoystickPresentData *data = (EnumJoystickPresentData *)pContext;
+    Uint16 vendor = 0;
+    Uint16 product = 0;
+    Uint16 version = 0;
+
+    if (SDL_memcmp(&pdidInstance->guidProduct.Data4[2], "PIDVID", 6) == 0) {
+        vendor = (Uint16)LOWORD(pdidInstance->guidProduct.Data1);
+        product = (Uint16)HIWORD(pdidInstance->guidProduct.Data1);
+        if (data->vendor == vendor && data->product == product && data->version == version) {
+            data->present = SDL_TRUE;
+            return DIENUM_STOP;
+        }
+    }
+    return DIENUM_CONTINUE;
+}
+
+SDL_bool
+SDL_DINPUT_JoystickPresent(Uint16 vendor, Uint16 product, Uint16 version)
+{
+    EnumJoystickPresentData data;
+
+    if (dinput == NULL) {
+        return SDL_FALSE;
+    }
+
+    data.vendor = vendor;
+    data.product = product;
+    data.version = version;
+    data.present = SDL_FALSE;
+    IDirectInput8_EnumDevices(dinput, DI8DEVCLASS_GAMECTRL, EnumJoystickPresentCallback, &data, DIEDFL_ATTACHEDONLY);
+
+    return data.present;
 }
 
 static BOOL CALLBACK
@@ -1242,6 +1307,12 @@ SDL_DINPUT_JoystickInit(void)
 void
 SDL_DINPUT_JoystickDetect(JoyStick_DeviceData **pContext)
 {
+}
+
+SDL_bool
+SDL_DINPUT_JoystickPresent(Uint16 vendor, Uint16 product, Uint16 version)
+{
+    return SDL_FALSE;
 }
 
 int

@@ -1,6 +1,6 @@
 /*
   Simple DirectMedia Layer
-  Copyright (C) 1997-2020 Sam Lantinga <slouken@libsdl.org>
+  Copyright (C) 1997-2021 Sam Lantinga <slouken@libsdl.org>
 
   This software is provided 'as-is', without any express or implied
   warranty.  In no event will the authors be held liable for any damages
@@ -28,6 +28,7 @@
 #include "../core/windows/SDL_windows.h"
 #endif
 #if defined(__OS2__)
+#undef HAVE_SYSCTLBYNAME
 #define INCL_DOS
 #include <os2.h>
 #ifndef QSV_NUMPROCESSORS
@@ -49,7 +50,7 @@
 #endif
 #if defined(__MACOSX__) && (defined(__ppc__) || defined(__ppc64__))
 #include <sys/sysctl.h>         /* For AltiVec check */
-#elif defined(__OpenBSD__) && defined(__powerpc__)
+#elif (defined(__OpenBSD__) || defined(__FreeBSD__)) && defined(__powerpc__)
 #include <sys/param.h>
 #include <sys/sysctl.h> /* For AltiVec check */
 #include <machine/cpu.h>
@@ -88,6 +89,10 @@
 #if __ARM_ARCH < 8
 #include <cpu-features.h>
 #endif
+#endif
+
+#if defined(HAVE_ELF_AUX_INFO)
+#include <sys/auxv.h>
 #endif
 
 #ifdef __RISCOS__
@@ -314,9 +319,11 @@ CPU_haveAltiVec(void)
 {
     volatile int altivec = 0;
 #ifndef SDL_CPUINFO_DISABLED
-#if (defined(__MACOSX__) && (defined(__ppc__) || defined(__ppc64__))) || (defined(__OpenBSD__) && defined(__powerpc__))
+#if (defined(__MACOSX__) && (defined(__ppc__) || defined(__ppc64__))) || (defined(__OpenBSD__) && defined(__powerpc__)) || (defined(__FreeBSD__) && defined(__powerpc__))
 #ifdef __OpenBSD__
     int selectors[2] = { CTL_MACHDEP, CPU_ALTIVEC };
+#elif defined(__FreeBSD__)
+    int selectors[2] = { CTL_HW, PPC_FEATURE_HAS_ALTIVEC };
 #else
     int selectors[2] = { CTL_HW, HW_VECTORUNIT };
 #endif
@@ -457,6 +464,13 @@ CPU_haveNEON(void)
     return 1;  /* all Apple ARMv7 chips and later have NEON. */
 #elif defined(__APPLE__)
     return 0;  /* assume anything else from Apple doesn't have NEON. */
+#elif defined(__OpenBSD__)
+    return 1;  /* OpenBSD only supports ARMv7 CPUs that have NEON. */
+#elif defined(HAVE_ELF_AUX_INFO) && defined(HWCAP_NEON)
+    unsigned long hasneon = 0;
+    if (elf_aux_info(AT_HWCAP, (void *)&hasneon, (int)sizeof(hasneon)) != 0)
+        return 0;
+    return ((hasneon & HWCAP_NEON) == HWCAP_NEON);
 #elif !defined(__arm__)
     return 0;  /* not an ARM CPU at all. */
 #elif defined(__QNXNTO__)
@@ -481,7 +495,7 @@ CPU_haveNEON(void)
     /* Use the VFPSupport_Features SWI to access the MVFR registers */
     {
         _kernel_swi_regs regs;
-	regs.r[0] = 0;
+        regs.r[0] = 0;
         if (_kernel_swi(VFPSupport_Features, &regs, &regs) == NULL) {
             if ((regs.r[2] & 0xFFF000) == 0x111000) {
                 return 1;
@@ -495,6 +509,17 @@ CPU_haveNEON(void)
 #endif
 }
 
+#if defined(__e2k__)
+inline int
+CPU_have3DNow(void)
+{
+#if defined(__3dNOW__)
+    return 1;
+#else
+    return 0;
+#endif
+}
+#else
 static int
 CPU_have3DNow(void)
 {
@@ -508,7 +533,46 @@ CPU_have3DNow(void)
     }
     return 0;
 }
+#endif
 
+#if defined(__e2k__)
+#define CPU_haveRDTSC() (0)
+#if defined(__MMX__)
+#define CPU_haveMMX() (1)
+#else
+#define CPU_haveMMX() (0)
+#endif
+#if defined(__SSE__)
+#define CPU_haveSSE() (1)
+#else
+#define CPU_haveSSE() (0)
+#endif
+#if defined(__SSE2__)
+#define CPU_haveSSE2() (1)
+#else
+#define CPU_haveSSE2() (0)
+#endif
+#if defined(__SSE3__)
+#define CPU_haveSSE3() (1)
+#else
+#define CPU_haveSSE3() (0)
+#endif
+#if defined(__SSE4_1__)
+#define CPU_haveSSE41() (1)
+#else
+#define CPU_haveSSE41() (0)
+#endif
+#if defined(__SSE4_2__)
+#define CPU_haveSSE42() (1)
+#else
+#define CPU_haveSSE42() (0)
+#endif
+#if defined(__AVX__)
+#define CPU_haveAVX() (1)
+#else
+#define CPU_haveAVX() (0)
+#endif
+#else
 #define CPU_haveRDTSC() (CPU_CPUIDFeatures[3] & 0x00000010)
 #define CPU_haveMMX() (CPU_CPUIDFeatures[3] & 0x00800000)
 #define CPU_haveSSE() (CPU_CPUIDFeatures[3] & 0x02000000)
@@ -517,7 +581,19 @@ CPU_have3DNow(void)
 #define CPU_haveSSE41() (CPU_CPUIDFeatures[2] & 0x00080000)
 #define CPU_haveSSE42() (CPU_CPUIDFeatures[2] & 0x00100000)
 #define CPU_haveAVX() (CPU_OSSavesYMM && (CPU_CPUIDFeatures[2] & 0x10000000))
+#endif
 
+#if defined(__e2k__)
+inline int
+CPU_haveAVX2(void)
+{
+#if defined(__AVX2__)
+    return 1;
+#else
+    return 0;
+#endif
+}
+#else
 static int
 CPU_haveAVX2(void)
 {
@@ -529,7 +605,15 @@ CPU_haveAVX2(void)
     }
     return 0;
 }
+#endif
 
+#if defined(__e2k__)
+inline int
+CPU_haveAVX512F(void)
+{
+    return 0;
+}
+#else
 static int
 CPU_haveAVX512F(void)
 {
@@ -541,6 +625,7 @@ CPU_haveAVX512F(void)
     }
     return 0;
 }
+#endif
 
 static int SDL_CPUCount = 0;
 
@@ -582,6 +667,17 @@ SDL_GetCPUCount(void)
     return SDL_CPUCount;
 }
 
+#if defined(__e2k__)
+inline const char *
+SDL_GetCPUType(void)
+{
+    static char SDL_CPUType[13];
+
+    SDL_strlcpy(SDL_CPUType, "E2K MACHINE", sizeof(SDL_CPUType));
+
+    return SDL_CPUType;
+}
+#else
 /* Oh, such a sweet sweet trick, just not very useful. :) */
 static const char *
 SDL_GetCPUType(void)
@@ -617,9 +713,21 @@ SDL_GetCPUType(void)
     }
     return SDL_CPUType;
 }
+#endif
 
 
 #ifdef TEST_MAIN  /* !!! FIXME: only used for test at the moment. */
+#if defined(__e2k__)
+inline const char *
+SDL_GetCPUName(void)
+{
+    static char SDL_CPUName[48];
+
+    SDL_strlcpy(SDL_CPUName, __builtin_cpu_name(), sizeof(SDL_CPUName));
+
+    return SDL_CPUName;
+}
+#else
 static const char *
 SDL_GetCPUName(void)
 {
@@ -693,6 +801,7 @@ SDL_GetCPUName(void)
     return SDL_CPUName;
 }
 #endif
+#endif
 
 int
 SDL_GetCPUCacheLineSize(void)
@@ -700,7 +809,7 @@ SDL_GetCPUCacheLineSize(void)
     const char *cpuType = SDL_GetCPUType();
     int a, b, c, d;
     (void) a; (void) b; (void) c; (void) d;
-    if (SDL_strcmp(cpuType, "GenuineIntel") == 0) {
+   if (SDL_strcmp(cpuType, "GenuineIntel") == 0 || SDL_strcmp(cpuType, "CentaurHauls") == 0 || SDL_strcmp(cpuType, "  Shanghai  ") == 0) {
         cpuid(0x00000001, a, b, c, d);
         return (((b >> 8) & 0xff) * 8);
     } else if (SDL_strcmp(cpuType, "AuthenticAMD") == 0 || SDL_strcmp(cpuType, "HygonGenuine") == 0) {
@@ -880,7 +989,7 @@ SDL_GetSystemRAM(void)
 #endif
 #ifdef HAVE_SYSCTLBYNAME
         if (SDL_SystemRAM <= 0) {
-#if defined(__FreeBSD__) || defined(__FreeBSD_kernel__) || defined(__NetBSD__)
+#if defined(__FreeBSD__) || defined(__FreeBSD_kernel__) || defined(__NetBSD__) || defined(__DragonFly__)
 #ifdef HW_REALMEM
             int mib[2] = {CTL_HW, HW_REALMEM};
 #else
@@ -953,6 +1062,58 @@ SDL_SIMDAlloc(const size_t len)
         retval += alignment - (((size_t) retval) % alignment);
         *(((void **) retval) - 1) = ptr;
     }
+    return retval;
+}
+
+void *
+SDL_SIMDRealloc(void *mem, const size_t len)
+{
+    const size_t alignment = SDL_SIMDGetAlignment();
+    const size_t padding = alignment - (len % alignment);
+    const size_t padded = (padding != alignment) ? (len + padding) : len;
+    Uint8 *retval = (Uint8*) mem;
+    void *oldmem = mem;
+    size_t memdiff = 0, ptrdiff;
+    Uint8 *ptr;
+
+    if (mem) {
+        void **realptr = (void **) mem;
+        realptr--;
+        mem = *(((void **) mem) - 1);
+
+        /* Check the delta between the real pointer and user pointer */
+        memdiff = ((size_t) oldmem) - ((size_t) mem);
+    }
+
+    ptr = (Uint8 *) SDL_realloc(mem, padded + alignment + sizeof (void *));
+
+    if (ptr == mem) {
+        return retval; /* Pointer didn't change, nothing to do */
+    }
+    if (ptr == NULL) {
+        return NULL; /* Out of memory, bail! */
+    }
+
+    /* Store the actual malloc pointer right before our aligned pointer. */
+    retval = ptr + sizeof (void *);
+    retval += alignment - (((size_t) retval) % alignment);
+
+    /* Make sure the delta is the same! */
+    if (mem) {
+        ptrdiff = ((size_t) retval) - ((size_t) ptr);
+        if (memdiff != ptrdiff) { /* Delta has changed, copy to new offset! */
+            oldmem = (void*) (((size_t) ptr) + memdiff);
+
+            /* Even though the data past the old `len` is undefined, this is the
+             * only length value we have, and it guarantees that we copy all the
+             * previous memory anyhow.
+             */
+            SDL_memmove(retval, oldmem, len);
+        }
+    }
+
+    /* Actually store the malloc pointer, finally. */
+    *(((void **) retval) - 1) = ptr;
     return retval;
 }
 
